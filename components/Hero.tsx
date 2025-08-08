@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Button } from './ui/button';
 import { ArrowDown, Phone, MessageCircle, Sparkles, Zap, Mail } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion } from 'framer-motion';
 
 class Particle {
   x: number;

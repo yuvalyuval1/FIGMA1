@@ -1,63 +1,87 @@
 import { Resend } from 'resend';
+import { z } from 'zod';
 
-// For Vercel serverless functions
-export default async function handler(req: any, res: any) {
-  // Handle CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+// Validation schema
+const contactSchema = z.object({
+  name: z.string().min(2, 'השם חייב להכיל לפחות 2 תווים'),
+  email: z.string().email('כתובת אימייל לא תקינה'),
+  phone: z.string().min(9, 'מספר טלפון לא תקין'),
+  message: z.string().min(10, 'ההודעה חייבת להכיל לפחות 10 תווים')
+});
 
-  // Handle preflight OPTIONS request
+type ContactFormData = z.infer<typeof contactSchema>;
+
+// CORS headers
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
+
+// Main handler function
+export default async function handler(req: Request): Promise<Response> {
+  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    return new Response(null, {
+      status: 200,
+      headers: corsHeaders,
+    });
   }
 
   // Only allow POST requests
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 
   try {
-    const { name, email, phone, message } = req.body;
-
-    // Validate required fields
-    if (!name || !email || !phone || !message) {
-      return res.status(400).json({ 
-        error: 'חסרים שדות חובה',
-        details: 'נא למלא את כל השדות הנדרשים'
-      });
-    }
-
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({ 
-        error: 'כתובת אימייל לא תקינה',
-        details: 'נא להזין כתובת אימייל תקינה'
-      });
-    }
-
-    // Validate phone (Israeli format)
-    const phoneRegex = /^[\d\s\-\(\)\+]+$/;
-    if (!phoneRegex.test(phone)) {
-      return res.status(400).json({ 
-        error: 'מספר טלפון לא תקין',
-        details: 'נא להזין מספר טלפון תקין'
-      });
-    }
+    // Parse and validate request body
+    const body = await req.json();
+    const validatedData = contactSchema.parse(body);
+    
+    const { name, email, phone, message } = validatedData;
 
     // Basic spam protection
     const spamKeywords = ['viagra', 'casino', 'loan', 'crypto', 'bitcoin'];
     const messageText = `${name} ${email} ${message}`.toLowerCase();
     if (spamKeywords.some(keyword => messageText.includes(keyword))) {
-      return res.status(400).json({ 
+      return new Response(JSON.stringify({ 
         error: 'הודעה נחסמה',
         details: 'ההודעה זוהתה כספאם'
+      }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // Initialize Resend (you'll need to set RESEND_API_KEY in environment variables)
-    const resend = new Resend(process.env.RESEND_API_KEY);
+    // Check if Resend API key is available
+    const resendApiKey = process.env.RESEND_API_KEY;
+    
+    if (!resendApiKey) {
+      // Graceful fallback - log to console and return success
+      console.warn('RESEND_API_KEY not found. Contact form data:', {
+        name,
+        email,
+        phone,
+        message,
+        timestamp: new Date().toISOString()
+      });
+      
+      return new Response(JSON.stringify({
+        success: true,
+        message: 'ההודעה התקבלה בהצלחה!',
+        details: 'נחזור אליכם בהקדם האפשרי',
+        queued: false
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Initialize Resend
+    const resend = new Resend(resendApiKey);
 
     // Email template for DigitaLoosh
     const emailHtml = `
@@ -133,13 +157,6 @@ export default async function handler(req: any, res: any) {
             margin: 10px 5px;
             font-weight: bold;
           }
-          .contact-info {
-            background: rgba(139, 92, 246, 0.1);
-            padding: 15px;
-            border-radius: 8px;
-            margin-top: 20px;
-            border: 1px solid rgba(139, 92, 246, 0.2);
-          }
         </style>
       </head>
       <body>
@@ -169,18 +186,15 @@ export default async function handler(req: any, res: any) {
             <div class="field-value">${message.replace(/\n/g, '<br>')}</div>
           </div>
           
-          <div class="contact-info">
-            <h3>פעולות מהירות:</h3>
-            <a href="mailto:${email}" class="cta">השב ללקוח 📧</a>
-            <a href="tel:${phone.replace(/\D/g, '')}" class="cta">התקשר ללקוח 📞</a>
-            <a href="https://wa.me/972533398557?text=${encodeURIComponent(`שלום ${name}, קיבלנו את פנייתכם דרך האתר. אשמח לסייע לכם!`)}" class="cta">וואטסאפ 📱</a>
-          </div>
-          
           <div class="footer">
             <p><strong>פנייה זו התקבלה מאתר DigitaLoosh</strong></p>
             <p>📞 053-339-8557 | 📧 digitaloosh@gmail.com</p>
             <p>🌐 https://digitaloosh.com</p>
             <p>זמן קבלה: ${new Date().toLocaleString('he-IL')}</p>
+            <div style="margin-top: 20px;">
+              <a href="mailto:${email}" class="cta">השב ללקוח 📧</a>
+              <a href="tel:${phone.replace(/\D/g, '')}" class="cta">התקשר ללקוח 📞</a>
+            </div>
           </div>
         </div>
       </body>
@@ -189,8 +203,8 @@ export default async function handler(req: any, res: any) {
 
     // Send email to DigitaLoosh team
     const { data, error } = await resend.emails.send({
-      from: 'website@digitaloosh.com', // Your verified domain
-      to: ['digitaloosh@gmail.com'], // Real email address
+      from: process.env.CONTACT_FROM || 'DigitaLoosh <noreply@digitaloosh.com>',
+      to: [process.env.CONTACT_TO || 'digitaloosh@gmail.com'],
       replyTo: email,
       subject: `פנייה חדשה מהאתר - ${name} (${phone})`,
       html: emailHtml,
@@ -208,13 +222,6 @@ ${message}
 📊 פרטים נוספים:
 • זמן קבלה: ${new Date().toLocaleString('he-IL')}
 • מקור: אתר DigitaLoosh
-• כתובת IP: ${req.headers['x-forwarded-for'] || req.connection.remoteAddress}
-• User Agent: ${req.headers['user-agent']}
-
-🚀 פעולות מהירות:
-• השב: ${email}
-• התקשר: ${phone}
-• וואטסאפ: https://wa.me/972533398557
 
 ═══════════════════════════════
 DigitaLoosh - סטודיו דיגיטלי ישראלי
@@ -224,9 +231,12 @@ DigitaLoosh - סטודיו דיגיטלי ישראלי
 
     if (error) {
       console.error('Email sending error:', error);
-      return res.status(500).json({ 
+      return new Response(JSON.stringify({ 
         error: 'שגיאה בשליחת האימייל',
         details: 'אנא נסו שוב או צרו קשר בטלפון 053-339-8557'
+      }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
@@ -271,20 +281,6 @@ DigitaLoosh - סטודיו דיגיטלי ישראלי
             margin: 15px 0;
             border: 1px solid rgba(139, 92, 246, 0.2);
           }
-          .contact-buttons {
-            text-align: center;
-            margin-top: 20px;
-          }
-          .btn {
-            background: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);
-            color: white;
-            padding: 12px 24px;
-            border-radius: 8px;
-            text-decoration: none;
-            display: inline-block;
-            margin: 5px;
-            font-weight: bold;
-          }
         </style>
       </head>
       <body>
@@ -303,24 +299,11 @@ DigitaLoosh - סטודיו דיגיטלי ישראלי
             </ul>
           </div>
           
-          <div class="highlight">
-            <h3>📞 נושא דחוף? צרו קשר ישירות:</h3>
-            <div class="contact-buttons">
-              <a href="tel:+972533398557" class="btn">📞 התקשרו: 053-339-8557</a>
-              <a href="https://wa.me/972533398557" class="btn">💬 וואטסאפ</a>
-            </div>
-          </div>
-          
           <p>בברכה והערכה,<br><strong>צוות DigitaLoosh</strong></p>
           
-          <hr style="border: 1px solid rgba(255,255,255,0.1); margin: 20px 0;">
-          
-          <div style="text-align: center; font-size: 14px; color: rgba(255,255,255,0.6);">
+          <div style="text-align: center; font-size: 14px; color: rgba(255,255,255,0.6); margin-top: 30px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
             <p>DigitaLoosh - סטודיו דיגיטלי ישראלי מוביל</p>
             <p>📞 053-339-8557 | 📧 digitaloosh@gmail.com</p>
-            <p>🔗 <a href="https://www.instagram.com/digitaloosh/" style="color: #8b5cf6;">Instagram</a> | 
-               <a href="https://www.tiktok.com/@digitaloosh" style="color: #8b5cf6;">TikTok</a> | 
-               <a href="https://www.facebook.com/people/Digitaloosh/61578902201826/" style="color: #8b5cf6;">Facebook</a></p>
           </div>
         </div>
       </body>
@@ -328,7 +311,7 @@ DigitaLoosh - סטודיו דיגיטלי ישראלי
     `;
 
     await resend.emails.send({
-      from: 'info@digitaloosh.com',
+      from: process.env.CONTACT_FROM || 'DigitaLoosh <info@digitaloosh.com>',
       to: [email],
       subject: `תודה על פנייתכם - DigitaLoosh נחזור אליכם בקרוב! 🚀`,
       html: autoReplyHtml,
@@ -344,10 +327,6 @@ DigitaLoosh - סטודיו דיגיטלי ישראלי
 • נחזור אליכם תוך 24 שעות עם הצעה מותאמת  
 • נקבע פגישת ייעוץ ראשונית (ללא התחייבות)
 
-📞 נושא דחוף? צרו קשר ישירות:
-• טלפון: 053-339-8557
-• וואטסאפ: https://wa.me/972533398557
-
 בברכה והערכה,
 צוות DigitaLoosh
 
@@ -358,61 +337,35 @@ DigitaLoosh - סטודיו דיגיטלי ישראלי מוביל
       `
     });
 
-    // Optional: Store in database or log (example implementation)
-    try {
-      // You could add database storage here
-      console.log('Contact form submission:', { name, email, phone, timestamp: new Date().toISOString() });
-    } catch (logError) {
-      console.error('Logging error:', logError);
-    }
-
-    return res.status(200).json({ 
+    return new Response(JSON.stringify({ 
       success: true,
       message: 'ההודעה נשלחה בהצלחה! 🎉',
-      details: 'נחזור אליכם בהקדם האפשרי (תוך 24 שעות)'
+      details: 'נחזור אליכם בהקדם האפשרי (תוך 24 שעות)',
+      queued: true
+    }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
   } catch (error) {
     console.error('Contact form error:', error);
-    return res.status(500).json({ 
+    
+    if (error instanceof z.ZodError) {
+      return new Response(JSON.stringify({
+        error: 'נתונים לא תקינים',
+        details: error.errors.map(e => e.message).join(', ')
+      }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    return new Response(JSON.stringify({ 
       error: 'שגיאה בשרת',
       details: 'אנא נסו שוב מאוחר יותר או צרו קשר בטלפון 053-339-8557'
+    }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 }
-
-// For Netlify functions, export as netlify function
-export const handler = async (event: any, context: any) => {
-  const req = {
-    method: event.httpMethod,
-    body: JSON.parse(event.body || '{}'),
-    headers: event.headers
-  };
-  
-  const res = {
-    setHeader: () => {},
-    status: (code: number) => ({
-      json: (data: any) => ({
-        statusCode: code,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Headers': 'Content-Type',
-          'Access-Control-Allow-Methods': 'POST, OPTIONS'
-        },
-        body: JSON.stringify(data)
-      }),
-      end: () => ({
-        statusCode: code,
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Headers': 'Content-Type',
-          'Access-Control-Allow-Methods': 'POST, OPTIONS'
-        },
-        body: ''
-      })
-    })
-  };
-
-  return await handler(req, res);
-};

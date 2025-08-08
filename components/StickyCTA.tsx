@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Phone, MessageCircle, X, Mail } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 const StickyCTA: React.FC = () => {
   const [isVisible, setIsVisible] = useState(false);

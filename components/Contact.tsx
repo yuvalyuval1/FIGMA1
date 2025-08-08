@@ -1,38 +1,45 @@
 import React, { useState } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { Card, CardContent } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { Label } from './ui/label';
 import { Phone, Mail, MessageCircle, MapPin, Clock, Copy, Send, CheckCircle, Instagram, Facebook } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner@2.0.3';
 
-interface FormData {
+// Form validation schema
+const contactSchema = z.object({
   name: string;
-  email: string;
-  phone: string;
-  message: string;
-}
+  email: z.string().email('נא להזין כתובת אימייל תקינה'),
+  phone: z.string().min(9, 'נא להזין מספר טלפון תקין'),
+  message: z.string().min(10, 'ההודעה חייבת להכיל לפחות 10 תווים')
+});
 
-interface FormErrors {
-  name?: string;
-  email?: string;
-  phone?: string;
-  message?: string;
-}
+type ContactFormData = z.infer<typeof contactSchema>;
 
 const Contact: React.FC = () => {
-  const [formData, setFormData] = useState<FormData>({
-    name: '',
-    email: '',
-    phone: '',
-    message: ''
-  });
-  
-  const [errors, setErrors] = useState<FormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+    reset,
+    watch
+  } = useForm<ContactFormData>({
+    resolver: zodResolver(contactSchema),
+    defaultValues: {
+      name: '',
+      email: '',
+      phone: '',
+      message: ''
+    }
+  });
 
   const businessInfo = {
     phone: '053-339-8557',
@@ -46,55 +53,7 @@ const Contact: React.FC = () => {
     facebook: 'https://www.facebook.com/people/Digitaloosh/61578902201826/?mibextid=wwXIfr'
   };
 
-  const validateForm = (): boolean => {
-    const newErrors: FormErrors = {};
-
-    if (!formData.name.trim()) {
-      newErrors.name = 'נא להזין שם מלא';
-    } else if (formData.name.trim().length < 2) {
-      newErrors.name = 'השם חייב להכיל לפחות 2 תווים';
-    }
-
-    if (!formData.email.trim()) {
-      newErrors.email = 'נא להזין כתובת אימייל';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      newErrors.email = 'נא להזין כתובת אימייל תקינה';
-    }
-
-    if (!formData.phone.trim()) {
-      newErrors.phone = 'נא להזין מספר טלפון';
-    } else if (!/^[\d\s\-\(\)]+$/.test(formData.phone)) {
-      newErrors.phone = 'נא להזין מספר טלפון תקין (ספרות בלבד)';
-    }
-
-    if (!formData.message.trim()) {
-      newErrors.message = 'נא להזין הודעה';
-    } else if (formData.message.trim().length < 10) {
-      newErrors.message = 'ההודעה חייבת להכיל לפחות 10 תווים';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-    
-    // Clear error when user starts typing
-    if (errors[name as keyof FormErrors]) {
-      setErrors(prev => ({ ...prev, [name]: undefined }));
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!validateForm()) {
-      toast.error('נא לתקן את השדות המסומנים באדום');
-      return;
-    }
-
+  const onSubmit = async (data: ContactFormData) => {
     setIsSubmitting(true);
 
     try {
@@ -103,7 +62,7 @@ const Contact: React.FC = () => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(data)
       });
 
       const result = await response.json();
@@ -117,7 +76,7 @@ const Contact: React.FC = () => {
       
       // Reset form after success
       setTimeout(() => {
-        setFormData({ name: '', email: '', phone: '', message: '' });
+        reset();
         setIsSuccess(false);
       }, 3000);
       
@@ -146,30 +105,6 @@ const Contact: React.FC = () => {
     navigator.clipboard.writeText(text).then(() => {
       toast.success(`${label} הועתק ללוח`);
     });
-  };
-
-  const formatPhoneForIsrael = (value: string) => {
-    // Remove all non-digits
-    const digits = value.replace(/\D/g, '');
-    
-    // Format as XXX-XXX-XXXX
-    if (digits.length >= 10) {
-      return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6, 10)}`;
-    } else if (digits.length >= 6) {
-      return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
-    } else if (digits.length >= 3) {
-      return `${digits.slice(0, 3)}-${digits.slice(3)}`;
-    }
-    return digits;
-  };
-
-  const handlePhoneInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const formatted = formatPhoneForIsrael(e.target.value);
-    setFormData(prev => ({ ...prev, phone: formatted }));
-    
-    if (errors.phone) {
-      setErrors(prev => ({ ...prev, phone: undefined }));
-    }
   };
 
   return (
@@ -222,25 +157,23 @@ const Contact: React.FC = () => {
                 <h3 className="text-2xl font-bold">שלחו לנו הודעה</h3>
               </div>
               
-              <form onSubmit={handleSubmit} className="space-y-6">
+              <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
                 <div>
                   <Label htmlFor="name">שם מלא *</Label>
                   <Input
                     id="name"
-                    name="name"
-                    value={formData.name}
-                    onChange={handleInputChange}
+                    {...register('name')}
                     className={`glass-card border-border/20 mt-2 transition-all duration-300 ${errors.name ? 'border-destructive' : 'focus:border-primary/40'}`}
                     placeholder="איך קוראים לכם?"
                     disabled={isSubmitting}
                   />
-                  {errors.name && (
+                  {errors.name?.message && (
                     <motion.p 
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
                       className="text-destructive text-sm mt-1"
                     >
-                      {errors.name}
+                      {errors.name.message}
                     </motion.p>
                   )}
                 </div>
@@ -249,21 +182,19 @@ const Contact: React.FC = () => {
                   <Label htmlFor="email">כתובת אימייל *</Label>
                   <Input
                     id="email"
-                    name="email"
                     type="email"
-                    value={formData.email}
-                    onChange={handleInputChange}
+                    {...register('email')}
                     className={`glass-card border-border/20 mt-2 transition-all duration-300 ${errors.email ? 'border-destructive' : 'focus:border-primary/40'}`}
                     placeholder="your@email.com"
                     disabled={isSubmitting}
                   />
-                  {errors.email && (
+                  {errors.email?.message && (
                     <motion.p 
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
                       className="text-destructive text-sm mt-1"
                     >
-                      {errors.email}
+                      {errors.email.message}
                     </motion.p>
                   )}
                 </div>
@@ -272,22 +203,19 @@ const Contact: React.FC = () => {
                   <Label htmlFor="phone">מספר טלפון *</Label>
                   <Input
                     id="phone"
-                    name="phone"
                     type="tel"
-                    value={formData.phone}
-                    onChange={handlePhoneInputChange}
+                    {...register('phone')}
                     className={`glass-card border-border/20 mt-2 transition-all duration-300 ${errors.phone ? 'border-destructive' : 'focus:border-primary/40'}`}
                     placeholder="053-339-8557"
                     disabled={isSubmitting}
-                    maxLength={12}
                   />
-                  {errors.phone && (
+                  {errors.phone?.message && (
                     <motion.p 
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
                       className="text-destructive text-sm mt-1"
                     >
-                      {errors.phone}
+                      {errors.phone.message}
                     </motion.p>
                   )}
                 </div>
@@ -296,20 +224,18 @@ const Contact: React.FC = () => {
                   <Label htmlFor="message">ספרו לנו על הפרויקט *</Label>
                   <Textarea
                     id="message"
-                    name="message"
-                    value={formData.message}
-                    onChange={handleInputChange}
+                    {...register('message')}
                     className={`glass-card border-border/20 min-h-[150px] mt-2 transition-all duration-300 ${errors.message ? 'border-destructive' : 'focus:border-primary/40'}`}
                     placeholder="תארו את הפרויקט שלכם: מה המטרה, איזה סוג אתר או אפליקציה אתם מחפשים, לוחות זמנים, ועוד כל פרט שיעזור לנו להבין את הצרכים שלכם..."
                     disabled={isSubmitting}
                   />
-                  {errors.message && (
+                  {errors.message?.message && (
                     <motion.p 
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
                       className="text-destructive text-sm mt-1"
                     >
-                      {errors.message}
+                      {errors.message.message}
                     </motion.p>
                   )}
                 </div>

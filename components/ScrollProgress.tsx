@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { motion, useScroll, useSpring } from 'motion/react';
+import { motion, useScroll, useSpring } from 'framer-motion';
 
 const ScrollProgress: React.FC = () => {
   const [isVisible, setIsVisible] = useState(false);
